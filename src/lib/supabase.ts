@@ -1,0 +1,41 @@
+import { createClient, SupabaseClient } from '@supabase/supabase-js'
+
+// Lazy singleton — avoids build-time crash when env vars are not yet set
+let _supabase: SupabaseClient | null = null
+
+export function getSupabase(): SupabaseClient {
+  if (_supabase) return _supabase
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL
+  const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+  if (!url || !key) throw new Error('Supabase env vars not set')
+  _supabase = createClient(url, key)
+  return _supabase
+}
+
+// Convenience alias — use this in client components
+export const supabase = {
+  get auth() { return getSupabase().auth },
+  from: (...args: Parameters<SupabaseClient['from']>) => getSupabase().from(...args),
+}
+
+// Types
+export type Category = {
+  id: string
+  user_id: string
+  name: string
+  type: 'income' | 'expense'
+  created_at: string
+}
+
+export type Transaction = {
+  id: string
+  user_id: string
+  amount: number
+  date: string
+  category_id: string
+  description?: string
+  is_recurring: boolean
+  type: 'income' | 'expense'
+  created_at: string
+  categories?: Category
+}
