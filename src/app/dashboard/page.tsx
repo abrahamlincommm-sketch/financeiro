@@ -5,48 +5,86 @@ import { useEffect, useState, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { supabase, Transaction, Category } from '@/lib/supabase'
-import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts'
+import {
+    PieChart, Pie, Cell, Tooltip, ResponsiveContainer,
+    BarChart, Bar, XAxis, YAxis, CartesianGrid,
+    AreaChart, Area,
+} from 'recharts'
 import {
     TrendingUp, TrendingDown, Wallet, Plus,
-    LogOut, RefreshCw, ChevronRight, Repeat2
+    LogOut, ChevronLeft, ChevronRight, Repeat2,
+    LayoutDashboard, ListOrdered, Settings,
 } from 'lucide-react'
 
-const CHART_COLORS = [
-    '#6366f1', '#22c55e', '#f59e0b', '#ec4899',
-    '#14b8a6', '#f97316', '#8b5cf6', '#06b6d4',
-]
+/* ─── helpers ─────────────────────────────────── */
+const DONUT_COLORS = ['#7c3aed', '#a855f7', '#ec4899', '#f43f5e', '#f59e0b', '#10b981', '#06b6d4', '#6366f1']
 
-function formatCurrency(v: number) {
-    return v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
+const fmt = (v: number) =>
+    v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
+
+const fmtShort = (v: number) => {
+    if (Math.abs(v) >= 1000) return `R$${(v / 1000).toFixed(1)}k`
+    return `R$${v.toFixed(0)}`
 }
 
-function getMonthRange() {
-    const now = new Date()
-    const start = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0]
-    const end = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().split('T')[0]
+function getRange(year: number, month: number) {
+    const start = `${year}-${String(month).padStart(2, '0')}-01`
+    const end = new Date(year, month, 0).toISOString().split('T')[0]
     return { start, end }
 }
 
-function monthLabel() {
-    return new Date().toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' })
+function monthName(year: number, month: number) {
+    return new Date(year, month - 1).toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' })
 }
 
+/* ─── types ───────────────────────────────────── */
+type ChartEntry = { name: string; value: number }
+type BarEntry = { label: string; income: number; expense: number }
+
+/* ─── Custom Tooltip ──────────────────────────── */
+const DonutTip = ({ active, payload }: any) => {
+    if (!active || !payload?.length) return null
+    return (
+        <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, padding: '8px 14px', fontSize: 13 }}>
+            <p style={{ fontWeight: 700 }}>{payload[0].name}</p>
+            <p style={{ color: 'var(--brand-light)' }}>{fmt(payload[0].value)}</p>
+        </div>
+    )
+}
+const BarTip = ({ active, payload, label }: any) => {
+    if (!active || !payload?.length) return null
+    return (
+        <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, padding: '8px 14px', fontSize: 12 }}>
+            <p style={{ fontWeight: 700, marginBottom: 4 }}>{label}</p>
+            <p style={{ color: '#10b981' }}>Receita: {fmtShort(payload[0]?.value ?? 0)}</p>
+            <p style={{ color: '#f43f5e' }}>Despesa: {fmtShort(payload[1]?.value ?? 0)}</p>
+        </div>
+    )
+}
+
+/* ═══════════════════════════════════════════════ */
 export default function DashboardPage() {
     const router = useRouter()
+    const now = new Date()
+    const [year, setYear] = useState(now.getFullYear())
+    const [month, setMonth] = useState(now.getMonth() + 1)
     const [transactions, setTransactions] = useState<Transaction[]>([])
-    const [categories, setCategories] = useState<Category[]>([])
+    const [barData, setBarData] = useState<BarEntry[]>([])
     const [loading, setLoading] = useState(true)
-    const [userEmail, setUserEmail] = useState('')
+    const [tab, setTab] = useState<'overview' | 'transactions'>('overview')
 
+    /* ── fetch current month + 6-month bar data ── */
     const fetchData = useCallback(async () => {
         setLoading(true)
-        const { start, end } = getMonthRange()
-
         const { data: { user } } = await supabase.auth.getUser()
         if (!user) { router.replace('/login'); return }
-        setUserEmail(user.email ?? '')
 
-        const [{ data: txData }, { data: catData }] = await Promise.all([
+        const { start, end } = getRange(year, month)
+
+        // 6 months history for bar chart
+        const sixMonthsAgo = new Date(year, month - 7, 1).toISOString().split('T')[0]
+
+        const [{ data: txData }, { data: allTx }] = await Promise.all([
             supabase
                 .from('transactions')
                 .select('*, categories(id, name, type)')
@@ -54,199 +92,373 @@ export default function DashboardPage() {
                 .gte('date', start)
                 .lte('date', end)
                 .order('date', { ascending: false }),
-
             supabase
-                .from('categories')
-                .select('*')
+                .from('transactions')
+                .select('amount, date, type')
                 .eq('user_id', user.id)
-                .order('name'),
+                .gte('date', sixMonthsAgo)
+                .lte('date', end),
         ])
 
         setTransactions(txData ?? [])
-        setCategories(catData ?? [])
+
+        // Build bar chart — last 6 months
+        const map: Record<string, { income: number; expense: number }> = {}
+            ; (allTx ?? []).forEach(t => {
+                const d = new Date(t.date + 'T12:00')
+                const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+                if (!map[key]) map[key] = { income: 0, expense: 0 }
+                if (t.type === 'income') map[key].income += Number(t.amount)
+                else map[key].expense += Number(t.amount)
+            })
+        const bar: BarEntry[] = Object.keys(map).sort().slice(-6).map(k => {
+            const [y, m] = k.split('-')
+            const label = new Date(Number(y), Number(m) - 1).toLocaleDateString('pt-BR', { month: 'short' })
+            return { label, income: map[k].income, expense: map[k].expense }
+        })
+        setBarData(bar)
         setLoading(false)
-    }, [router])
+    }, [year, month, router])
 
     useEffect(() => { fetchData() }, [fetchData])
 
-    async function handleLogout() {
-        await supabase.auth.signOut()
-        router.replace('/login')
+    function prevMonth() {
+        if (month === 1) { setYear(y => y - 1); setMonth(12) }
+        else { setMonth(m => m - 1) }
+    }
+    function nextMonth() {
+        if (month === 12) { setYear(y => y + 1); setMonth(1) }
+        else { setMonth(m => m + 1) }
     }
 
-    // Summary calcs
-    const totalIncome = transactions.filter(t => t.type === 'income').reduce((a, t) => a + Number(t.amount), 0)
-    const totalExpense = transactions.filter(t => t.type === 'expense').reduce((a, t) => a + Number(t.amount), 0)
-    const balance = totalIncome - totalExpense
+    /* ── KPIs ── */
+    const income = transactions.filter(t => t.type === 'income').reduce((a, t) => a + Number(t.amount), 0)
+    const expense = transactions.filter(t => t.type === 'expense').reduce((a, t) => a + Number(t.amount), 0)
+    const balance = income - expense
+    const savingsRate = income > 0 ? Math.max(0, Math.min(100, ((income - expense) / income) * 100)) : 0
+    const expPct = income > 0 ? Math.min(100, (expense / income) * 100) : 0
 
-    // Donut chart data: group expenses by category
-    const expenseMap: Record<string, number> = {}
-    transactions
-        .filter(t => t.type === 'expense')
-        .forEach(t => {
-            const catName = (t.categories as Category | undefined)?.name ?? 'Outros'
-            expenseMap[catName] = (expenseMap[catName] ?? 0) + Number(t.amount)
-        })
-    const chartData = Object.entries(expenseMap).map(([name, value]) => ({ name, value }))
+    /* ── Donut data ── */
+    const expMap: Record<string, number> = {}
+    transactions.filter(t => t.type === 'expense').forEach(t => {
+        const n = (t.categories as Category | undefined)?.name ?? 'Outros'
+        expMap[n] = (expMap[n] ?? 0) + Number(t.amount)
+    })
+    const donutData: ChartEntry[] = Object.entries(expMap)
+        .sort((a, b) => b[1] - a[1])
+        .map(([name, value]) => ({ name, value }))
 
-    const CustomTooltip = ({ active, payload }: any) => {
-        if (active && payload?.length) {
-            return (
-                <div className="card !py-2 !px-3 text-sm">
-                    <p className="font-semibold">{payload[0].name}</p>
-                    <p style={{ color: CHART_COLORS[0] }}>{formatCurrency(payload[0].value)}</p>
-                </div>
-            )
-        }
-        return null
-    }
+    /* ── Totals for recurring ── */
+    const recurring = transactions.filter(t => t.is_recurring).reduce((a, t) => a + Number(t.amount), 0)
 
+    /* ══════════════════════════════════════════ */
     return (
-        <div className="min-h-screen pb-24" style={{ background: 'var(--color-bg)' }}>
-            {/* Header */}
-            <header className="sticky top-0 z-20 px-4 pt-12 pb-4" style={{ background: 'linear-gradient(to bottom, #030712 85%, transparent)' }}>
-                <div className="flex items-center justify-between">
+        <div style={{ background: 'var(--bg)', minHeight: '100dvh', paddingBottom: '7rem' }}>
+
+            {/* ─── Header ─── */}
+            <header style={{
+                background: 'linear-gradient(180deg, rgba(124,58,237,.18) 0%, transparent 100%)',
+                padding: '3rem 1.1rem 1.25rem',
+                position: 'sticky', top: 0, zIndex: 30,
+                backdropFilter: 'blur(12px)',
+                WebkitBackdropFilter: 'blur(12px)',
+            }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1rem' }}>
                     <div>
-                        <p className="text-xs text-gray-500 uppercase tracking-widest">Dashboard</p>
-                        <p className="text-sm text-gray-400 capitalize">{monthLabel()}</p>
+                        <p style={{ fontWeight: 800, fontSize: '1.25rem', letterSpacing: '-.02em' }}>
+                            <span style={{ background: 'linear-gradient(90deg,#a78bfa,#f472b6)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>
+                                Finanças
+                            </span>Pro
+                        </p>
+                        <p className="stat-label" style={{ marginTop: '.1rem' }}>visão geral</p>
                     </div>
-                    <div className="flex items-center gap-2">
-                        <button onClick={fetchData} className="btn-ghost !px-2.5 !py-2.5" aria-label="Atualizar">
-                            <RefreshCw size={16} className={loading ? 'animate-spin' : ''} />
-                        </button>
-                        <button onClick={handleLogout} className="btn-ghost !px-2.5 !py-2.5" aria-label="Sair">
-                            <LogOut size={16} />
-                        </button>
-                    </div>
+                    <button onClick={async () => { await supabase.auth.signOut(); router.replace('/login') }}
+                        className="btn-ghost" style={{ padding: '.55rem .75rem' }}>
+                        <LogOut size={15} />
+                    </button>
+                </div>
+
+                {/* Month Nav */}
+                <div style={{
+                    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                    background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 14, padding: '.5rem .75rem'
+                }}>
+                    <button onClick={prevMonth} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--muted)', display: 'flex' }}>
+                        <ChevronLeft size={20} />
+                    </button>
+                    <p style={{ fontWeight: 700, fontSize: '.95rem', textTransform: 'capitalize' }}>{monthName(year, month)}</p>
+                    <button onClick={nextMonth} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--muted)', display: 'flex' }}>
+                        <ChevronRight size={20} />
+                    </button>
                 </div>
             </header>
 
-            <main className="px-4 flex flex-col gap-5 fade-in">
-                {/* Summary Cards */}
-                <div className="grid grid-cols-3 gap-3">
-                    <div className="card col-span-1 !p-3 flex flex-col gap-1">
-                        <div className="flex items-center gap-1.5">
-                            <TrendingUp size={14} className="badge-income" />
-                            <span className="text-xs text-gray-400">Receitas</span>
-                        </div>
-                        <p className="text-green-400 font-bold text-base leading-tight">{formatCurrency(totalIncome)}</p>
-                    </div>
-                    <div className="card col-span-1 !p-3 flex flex-col gap-1">
-                        <div className="flex items-center gap-1.5">
-                            <TrendingDown size={14} className="badge-expense" />
-                            <span className="text-xs text-gray-400">Despesas</span>
-                        </div>
-                        <p className="text-red-400 font-bold text-base leading-tight">{formatCurrency(totalExpense)}</p>
-                    </div>
-                    <div className="card col-span-1 !p-3 flex flex-col gap-1" style={{ borderColor: balance >= 0 ? '#16a34a44' : '#dc262644' }}>
-                        <div className="flex items-center gap-1.5">
-                            <Wallet size={14} style={{ color: balance >= 0 ? '#22c55e' : '#ef4444' }} />
-                            <span className="text-xs text-gray-400">Saldo</span>
-                        </div>
-                        <p className={`font-bold text-base leading-tight ${balance >= 0 ? 'text-green-400' : 'text-red-400'}`}>{formatCurrency(balance)}</p>
-                    </div>
+            {/* ─── Tab Toggle ─── */}
+            <div style={{ padding: '0 1.1rem .75rem' }}>
+                <div className="tab-group">
+                    <button className="tab-btn" onClick={() => setTab('overview')}
+                        style={{
+                            background: tab === 'overview' ? 'linear-gradient(135deg,#7c3aed,#a855f7)' : 'transparent',
+                            color: tab === 'overview' ? '#fff' : 'var(--muted)'
+                        }}>
+                        Visão Geral
+                    </button>
+                    <button className="tab-btn" onClick={() => setTab('transactions')}
+                        style={{
+                            background: tab === 'transactions' ? 'linear-gradient(135deg,#7c3aed,#a855f7)' : 'transparent',
+                            color: tab === 'transactions' ? '#fff' : 'var(--muted)'
+                        }}>
+                        Transações
+                    </button>
                 </div>
+            </div>
 
-                {/* Donut Chart */}
-                {chartData.length > 0 && (
-                    <div className="card">
-                        <h2 className="text-sm font-semibold text-gray-300 mb-3">Despesas por Categoria</h2>
-                        <div className="flex items-center gap-4">
-                            <div style={{ width: 130, height: 130 }}>
+            {loading ? (
+                <div style={{ display: 'flex', justifyContent: 'center', paddingTop: '4rem' }}>
+                    <div className="spinner-lg" />
+                </div>
+            ) : tab === 'overview' ? (
+                /* ──────────── OVERVIEW TAB ──────────── */
+                <main style={{ padding: '0 1.1rem', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+
+                    {/* KPI Cards row */}
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '.75rem' }}>
+                        {/* Balance — spans full */}
+                        <div className="card fade-up" style={{
+                            gridColumn: '1/-1',
+                            background: 'linear-gradient(135deg, rgba(124,58,237,.2) 0%, rgba(168,85,247,.1) 100%)',
+                            border: '1px solid rgba(124,58,237,.35)',
+                        }}>
+                            <p className="stat-label">Saldo do mês</p>
+                            <p className="stat-value" style={{
+                                fontSize: '2rem',
+                                background: balance >= 0
+                                    ? 'linear-gradient(90deg,#10b981,#34d399)'
+                                    : 'linear-gradient(90deg,#f43f5e,#fb923c)',
+                                WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent',
+                            }}>{fmt(balance)}</p>
+                            {/* Progress bar */}
+                            <div style={{ marginTop: '.75rem' }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '.35rem' }}>
+                                    <span style={{ fontSize: '.72rem', color: 'var(--muted)' }}>Gasto de receita</span>
+                                    <span style={{ fontSize: '.72rem', fontWeight: 700, color: expPct > 80 ? 'var(--danger)' : 'var(--success)' }}>{expPct.toFixed(0)}%</span>
+                                </div>
+                                <div className="progress-track">
+                                    <div className="progress-fill" style={{
+                                        width: `${expPct}%`,
+                                        background: expPct > 80
+                                            ? 'linear-gradient(90deg,#f43f5e,#fb923c)'
+                                            : 'linear-gradient(90deg,#10b981,#34d399)',
+                                    }} />
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Income */}
+                        <div className="card fade-up" style={{
+                            background: 'linear-gradient(135deg, rgba(16,185,129,.15) 0%, rgba(5,150,105,.08) 100%)',
+                            border: '1px solid rgba(16,185,129,.25)',
+                        }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '.4rem', marginBottom: '.4rem' }}>
+                                <div style={{ width: 28, height: 28, borderRadius: 8, background: 'var(--success-dim)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                    <TrendingUp size={14} color="var(--success)" />
+                                </div>
+                                <p className="stat-label">Receitas</p>
+                            </div>
+                            <p className="stat-value" style={{ fontSize: '1.1rem', color: 'var(--success)' }}>{fmt(income)}</p>
+                        </div>
+
+                        {/* Expense */}
+                        <div className="card fade-up" style={{
+                            background: 'linear-gradient(135deg, rgba(244,63,94,.15) 0%, rgba(220,38,38,.08) 100%)',
+                            border: '1px solid rgba(244,63,94,.25)',
+                        }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '.4rem', marginBottom: '.4rem' }}>
+                                <div style={{ width: 28, height: 28, borderRadius: 8, background: 'var(--danger-dim)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                    <TrendingDown size={14} color="var(--danger)" />
+                                </div>
+                                <p className="stat-label">Despesas</p>
+                            </div>
+                            <p className="stat-value" style={{ fontSize: '1.1rem', color: 'var(--danger)' }}>{fmt(expense)}</p>
+                        </div>
+
+                        {/* Savings rate */}
+                        <div className="card fade-up" style={{ gridColumn: '1/-1', display: 'flex', gap: '1rem', alignItems: 'center' }}>
+                            <div style={{ flex: 1 }}>
+                                <p className="stat-label">Taxa de poupança</p>
+                                <p className="stat-value" style={{ fontSize: '1.5rem', color: 'var(--brand-light)' }}>{savingsRate.toFixed(1)}%</p>
+                                <p style={{ fontSize: '.75rem', color: 'var(--muted)', marginTop: '.2rem' }}>
+                                    Fixas: {fmt(recurring)}
+                                </p>
+                            </div>
+                            <div style={{ width: 70, height: 70 }}>
                                 <ResponsiveContainer width="100%" height="100%">
                                     <PieChart>
-                                        <Pie data={chartData} cx="50%" cy="50%" innerRadius={38} outerRadius={58} dataKey="value" stroke="none">
-                                            {chartData.map((_, i) => (
-                                                <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />
-                                            ))}
+                                        <Pie data={[{ value: savingsRate }, { value: 100 - savingsRate }]}
+                                            cx="50%" cy="50%" innerRadius={22} outerRadius={32} dataKey="value" stroke="none" startAngle={90} endAngle={-270}>
+                                            <Cell fill="#7c3aed" />
+                                            <Cell fill="rgba(30,30,63,.6)" />
                                         </Pie>
-                                        <Tooltip content={<CustomTooltip />} />
                                     </PieChart>
                                 </ResponsiveContainer>
                             </div>
-                            <div className="flex flex-col gap-1.5 flex-1 min-w-0">
-                                {chartData.map((d, i) => {
-                                    const pct = totalExpense > 0 ? ((d.value / totalExpense) * 100).toFixed(0) : '0'
-                                    return (
-                                        <div key={i} className="flex items-center gap-2 text-xs">
-                                            <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: CHART_COLORS[i % CHART_COLORS.length] }} />
-                                            <span className="truncate text-gray-300">{d.name}</span>
-                                            <span className="ml-auto text-gray-400 font-medium flex-shrink-0">{pct}%</span>
-                                        </div>
-                                    )
-                                })}
+                        </div>
+                    </div>
+
+                    {/* ── Donut Chart ── */}
+                    {donutData.length > 0 && (
+                        <div className="card fade-up">
+                            <p className="section-title">Despesas por Categoria</p>
+                            <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
+                                <div style={{ width: 140, height: 140, flexShrink: 0 }}>
+                                    <ResponsiveContainer width="100%" height="100%">
+                                        <PieChart>
+                                            <Pie data={donutData} cx="50%" cy="50%" innerRadius={42} outerRadius={62}
+                                                dataKey="value" stroke="none" paddingAngle={2}>
+                                                {donutData.map((_, i) => (
+                                                    <Cell key={i} fill={DONUT_COLORS[i % DONUT_COLORS.length]} />
+                                                ))}
+                                            </Pie>
+                                            <Tooltip content={<DonutTip />} />
+                                        </PieChart>
+                                    </ResponsiveContainer>
+                                </div>
+                                <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '.5rem', overflow: 'hidden' }}>
+                                    {donutData.slice(0, 6).map((d, i) => {
+                                        const pct = expense > 0 ? ((d.value / expense) * 100).toFixed(0) : '0'
+                                        return (
+                                            <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '.5rem' }}>
+                                                <span style={{ width: 8, height: 8, borderRadius: '50%', background: DONUT_COLORS[i % DONUT_COLORS.length], flexShrink: 0 }} />
+                                                <span style={{ flex: 1, fontSize: '.75rem', color: '#cbd5e1', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{d.name}</span>
+                                                <span style={{ fontSize: '.72rem', fontWeight: 700, color: 'var(--muted)', flexShrink: 0 }}>{pct}%</span>
+                                            </div>
+                                        )
+                                    })}
+                                </div>
                             </div>
                         </div>
-                    </div>
-                )}
+                    )}
 
-                {/* Recent Transactions */}
-                <div className="card !p-0 overflow-hidden">
-                    <div className="flex items-center justify-between px-4 py-3 border-b border-gray-800">
-                        <h2 className="text-sm font-semibold text-gray-300">Últimas Transações</h2>
-                        <span className="text-xs text-gray-500">{transactions.length} no mês</span>
-                    </div>
-
-                    {loading ? (
-                        <div className="flex justify-center py-10">
-                            <div className="spinner" />
+                    {/* ── Bar Chart: 6 months ── */}
+                    {barData.length > 1 && (
+                        <div className="card fade-up">
+                            <p className="section-title">Últimos 6 meses</p>
+                            <div style={{ height: 150 }}>
+                                <ResponsiveContainer width="100%" height="100%">
+                                    <BarChart data={barData} barGap={4} barCategoryGap="30%">
+                                        <CartesianGrid strokeDasharray="3 3" stroke="rgba(30,30,63,.8)" vertical={false} />
+                                        <XAxis dataKey="label" tick={{ fill: 'var(--muted)', fontSize: 10 }} axisLine={false} tickLine={false} />
+                                        <YAxis tickFormatter={fmtShort} tick={{ fill: 'var(--muted)', fontSize: 10 }} axisLine={false} tickLine={false} width={45} />
+                                        <Tooltip content={<BarTip />} cursor={{ fill: 'rgba(124,58,237,.07)' }} />
+                                        <Bar dataKey="income" name="Receita" fill="#10b981" radius={[6, 6, 0, 0]} />
+                                        <Bar dataKey="expense" name="Despesa" fill="#f43f5e" radius={[6, 6, 0, 0]} />
+                                    </BarChart>
+                                </ResponsiveContainer>
+                            </div>
+                            <div style={{ display: 'flex', gap: '1rem', justifyContent: 'center', marginTop: '.5rem' }}>
+                                <span style={{ display: 'flex', alignItems: 'center', gap: '.3rem', fontSize: '.72rem', color: 'var(--muted)' }}>
+                                    <span style={{ width: 8, height: 8, borderRadius: 2, background: '#10b981', display: 'inline-block' }} />Receita
+                                </span>
+                                <span style={{ display: 'flex', alignItems: 'center', gap: '.3rem', fontSize: '.72rem', color: 'var(--muted)' }}>
+                                    <span style={{ width: 8, height: 8, borderRadius: 2, background: '#f43f5e', display: 'inline-block' }} />Despesa
+                                </span>
+                            </div>
                         </div>
-                    ) : transactions.length === 0 ? (
-                        <div className="flex flex-col items-center gap-3 py-10 text-gray-500">
-                            <Wallet size={36} strokeWidth={1} />
-                            <p className="text-sm">Nenhuma transação este mês</p>
-                            <Link href="/transactions/new" className="btn-ghost text-xs !px-4 !py-2">
-                                Adicionar primeira transação
+                    )}
+
+                    {/* ── Empty state ── */}
+                    {transactions.length === 0 && (
+                        <div className="card fade-up" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '1rem', padding: '2.5rem 1rem', textAlign: 'center' }}>
+                            <Wallet size={40} color="var(--muted)" strokeWidth={1.5} />
+                            <div>
+                                <p style={{ fontWeight: 700, marginBottom: '.25rem' }}>Nenhuma transação</p>
+                                <p style={{ color: 'var(--muted)', fontSize: '.85rem' }}>Adicione sua primeira receita ou despesa</p>
+                            </div>
+                            <Link href="/transactions/new" className="btn-primary" style={{ width: 'auto', padding: '.7rem 1.5rem' }}>
+                                <Plus size={16} /> Adicionar
                             </Link>
                         </div>
-                    ) : (
-                        <ul>
-                            {transactions.slice(0, 20).map((tx, i) => (
-                                <li
-                                    key={tx.id}
-                                    className="flex items-center gap-3 px-4 py-3.5 border-b border-gray-800/60 last:border-0 hover:bg-gray-900/50 transition-colors"
-                                    style={{ animationDelay: `${i * 0.03}s` }}
-                                >
-                                    {/* Category icon circle */}
-                                    <div className={`w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0 ${tx.type === 'income' ? 'bg-green-900/60' : 'bg-red-900/60'}`}>
-                                        {tx.type === 'income'
-                                            ? <TrendingUp size={15} className="text-green-400" />
-                                            : <TrendingDown size={15} className="text-red-400" />
-                                        }
-                                    </div>
-                                    {/* Details */}
-                                    <div className="flex-1 min-w-0">
-                                        <div className="flex items-center gap-1.5">
-                                            <p className="text-sm font-medium text-gray-200 truncate">
-                                                {(tx.categories as Category | undefined)?.name ?? 'Sem categoria'}
-                                            </p>
-                                            {tx.is_recurring && <Repeat2 size={12} className="text-indigo-400 flex-shrink-0" />}
-                                        </div>
-                                        <p className="text-xs text-gray-500 truncate">
-                                            {tx.description ?? new Date(tx.date + 'T12:00').toLocaleDateString('pt-BR')}
-                                        </p>
-                                    </div>
-                                    {/* Amount */}
-                                    <p className={`text-sm font-semibold flex-shrink-0 ${tx.type === 'income' ? 'text-green-400' : 'text-red-400'}`}>
-                                        {tx.type === 'income' ? '+' : '-'}{formatCurrency(Number(tx.amount))}
-                                    </p>
-                                </li>
-                            ))}
-                        </ul>
                     )}
-                </div>
-            </main>
 
-            {/* FAB - Add Transaction */}
-            <Link
-                href="/transactions/new"
-                id="fab-add-transaction"
-                className="fixed bottom-6 right-5 z-30 w-14 h-14 rounded-full flex items-center justify-center shadow-2xl transition-transform active:scale-95"
-                style={{ background: 'linear-gradient(135deg, #6366f1 0%, #818cf8 100%)', boxShadow: '0 8px 32px rgba(99,102,241,0.45)' }}
-                aria-label="Nova transação"
-            >
+                </main>
+            ) : (
+                /* ──────────── TRANSACTIONS TAB ──────────── */
+                <main style={{ padding: '0 1.1rem' }}>
+                    <div className="card fade-up" style={{ padding: 0, overflow: 'hidden' }}>
+                        <div style={{ padding: '1rem 1.1rem .6rem', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <p className="section-title" style={{ margin: 0 }}>Todas as transações</p>
+                            <span style={{ fontSize: '.75rem', color: 'var(--muted)' }}>{transactions.length} registros</span>
+                        </div>
+                        {transactions.length === 0 ? (
+                            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '.75rem', padding: '2.5rem 1rem', color: 'var(--muted)', textAlign: 'center' }}>
+                                <ListOrdered size={32} strokeWidth={1.5} />
+                                <p style={{ fontSize: '.875rem' }}>Sem transações neste período</p>
+                            </div>
+                        ) : (
+                            transactions.map((tx, i) => {
+                                const isIncome = tx.type === 'income'
+                                const cat = (tx.categories as Category | undefined)?.name ?? 'Sem categoria'
+                                return (
+                                    <div key={tx.id} className="tx-row fade-up" style={{ animationDelay: `${i * 0.025}s` }}>
+                                        <div style={{
+                                            width: 40, height: 40, borderRadius: 13, flexShrink: 0,
+                                            background: isIncome ? 'var(--success-dim)' : 'var(--danger-dim)',
+                                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                        }}>
+                                            {isIncome
+                                                ? <TrendingUp size={17} color="var(--success)" />
+                                                : <TrendingDown size={17} color="var(--danger)" />
+                                            }
+                                        </div>
+                                        <div style={{ flex: 1, minWidth: 0 }}>
+                                            <div style={{ display: 'flex', alignItems: 'center', gap: '.4rem' }}>
+                                                <p style={{ fontWeight: 600, fontSize: '.87rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{cat}</p>
+                                                {tx.is_recurring && (
+                                                    <span style={{ display: 'flex', alignItems: 'center' }}>
+                                                        <Repeat2 size={12} color="var(--brand-light)" />
+                                                    </span>
+                                                )}
+                                            </div>
+                                            <p style={{ fontSize: '.73rem', color: 'var(--muted)', marginTop: '.1rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                                {tx.description || new Date(tx.date + 'T12:00').toLocaleDateString('pt-BR')}
+                                            </p>
+                                        </div>
+                                        <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                                            <p style={{ fontWeight: 700, fontSize: '.87rem', color: isIncome ? 'var(--success)' : 'var(--danger)' }}>
+                                                {isIncome ? '+' : '-'}{fmt(Number(tx.amount))}
+                                            </p>
+                                            <p style={{ fontSize: '.68rem', color: 'var(--muted)', marginTop: '.1rem' }}>
+                                                {new Date(tx.date + 'T12:00').toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' })}
+                                            </p>
+                                        </div>
+                                    </div>
+                                )
+                            })
+                        )}
+                    </div>
+                </main>
+            )}
+
+            {/* ─── FAB ─── */}
+            <Link href="/transactions/new" className="fab" id="fab-add" aria-label="Nova transação">
                 <Plus size={24} color="white" />
             </Link>
+
+            {/* ─── Bottom Nav ─── */}
+            <nav className="bottom-nav">
+                <button className={`nav-item ${tab === 'overview' ? 'active' : ''}`} onClick={() => setTab('overview')}>
+                    <LayoutDashboard size={20} />
+                    Dashboard
+                </button>
+                <button className={`nav-item ${tab === 'transactions' ? 'active' : ''}`} onClick={() => setTab('transactions')}>
+                    <ListOrdered size={20} />
+                    Transações
+                </button>
+                <Link href="/transactions/new" className="nav-item">
+                    <Plus size={20} />
+                    Adicionar
+                </Link>
+            </nav>
         </div>
     )
 }
