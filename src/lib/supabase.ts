@@ -23,7 +23,7 @@ export type Category = {
   id: string
   user_id: string
   name: string
-  type: 'income' | 'expense'
+  type: 'income' | 'expense' | 'investment'
   created_at: string
 }
 
@@ -35,7 +35,8 @@ export type Transaction = {
   category_id: string
   description?: string
   is_recurring: boolean
-  type: 'income' | 'expense'
+  type: 'income' | 'expense' | 'investment'
   created_at: string
   categories?: Category
 }
+
