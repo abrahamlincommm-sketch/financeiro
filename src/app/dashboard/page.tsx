@@ -117,7 +117,9 @@ function KpiCard({ label, value, color, icon, delay = 0 }: { label: string; valu
 /* ══════════════════════════════════════════════════════ */
 export default function DashboardPage() {
     const router = useRouter()
-    const now = new Date()
+    // Stable reference to "now" — avoids infinite re-render loop
+    const nowRef = useRef(new Date())
+    const now = nowRef.current
     const [year, setYear] = useState(now.getFullYear())
     const [month, setMonth] = useState(now.getMonth() + 1)
     const [transactions, setTx] = useState<Transaction[]>([])
@@ -177,7 +179,8 @@ export default function DashboardPage() {
         }
         setArea(area)
         setLoad(false)
-    }, [year, month, router, now])
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [year, month, router])
 
     useEffect(() => { fetchData() }, [fetchData])
 
