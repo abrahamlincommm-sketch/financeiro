@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { GoogleGenAI } from '@google/genai'
 
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY ?? '' })
+const API_KEY = process.env.GEMINI_API_KEY ?? ''
+const MODEL = 'gemini-1.5-flash'
+const ENDPOINT = `https://generativelanguage.googleapis.com/v1/models/${MODEL}:generateContent`
 
 export async function POST(req: NextRequest) {
     try {
@@ -14,10 +15,9 @@ export async function POST(req: NextRequest) {
 
         const systemPrompt = buildSystemPrompt(context)
 
-        // Build contents array with full conversation history
         const contents = [
             { role: 'user', parts: [{ text: systemPrompt }] },
-            { role: 'model', parts: [{ text: 'Entendido! Analisei seus dados financeiros e estou pronto para ajudar com recomendações personalizadas. Como posso ajudar?' }] },
+            { role: 'model', parts: [{ text: 'Entendido! Analisei seus dados e estou pronto para ajudar com recomendações personalizadas.' }] },
             ...history.map(h => ({
                 role: h.role as 'user' | 'model',
                 parts: [{ text: h.text }],
@@ -25,16 +25,22 @@ export async function POST(req: NextRequest) {
             { role: 'user', parts: [{ text: message }] },
         ]
 
-        const response = await ai.models.generateContent({
-            model: 'gemini-1.5-flash',
-            contents,
-            config: {
-                maxOutputTokens: 800,
-                temperature: 0.7,
-            },
+        const res = await fetch(`${ENDPOINT}?key=${API_KEY}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                contents,
+                generationConfig: { maxOutputTokens: 800, temperature: 0.7 },
+            }),
         })
 
-        const reply = response.text ?? '(sem resposta)'
+        const data = await res.json()
+
+        if (!res.ok) {
+            return NextResponse.json({ error: JSON.stringify(data.error ?? data) }, { status: res.status })
+        }
+
+        const reply: string = data.candidates?.[0]?.content?.parts?.[0]?.text ?? '(sem resposta)'
         return NextResponse.json({ reply })
 
     } catch (err: any) {
@@ -44,13 +50,8 @@ export async function POST(req: NextRequest) {
 }
 
 type FinancialContext = {
-    income: number
-    expense: number
-    invested: number
-    balance: number
-    savingsRate: number
-    expenseRate: number
-    month: string
+    income: number; expense: number; invested: number; balance: number
+    savingsRate: number; expenseRate: number; month: string
     topCategories: { name: string; amount: number }[]
     portfolio: { ticker: string; quantity: number; avgPrice: number; assetType: string }[]
 }
@@ -58,36 +59,33 @@ type FinancialContext = {
 function buildSystemPrompt(ctx: FinancialContext): string {
     const portfolioStr = ctx.portfolio.length > 0
         ? ctx.portfolio.map(p => `  - ${p.ticker} (${p.assetType}): ${p.quantity} cotas, preço médio R$${p.avgPrice.toFixed(2)}`).join('\n')
-        : '  (Carteira vazia — nenhum ativo cadastrado ainda)'
+        : '  (Carteira vazia)'
 
     const categoriesStr = ctx.topCategories.length > 0
         ? ctx.topCategories.slice(0, 6).map(c => `  - ${c.name}: R$${c.amount.toFixed(2)}`).join('\n')
         : '  (Sem despesas no mês)'
 
-    return `Você é a FinanceIA, assistente financeira pessoal do aplicativo FinançasPro. Você é especialista em finanças pessoais, mercado brasileiro (B3, FIIs, Tesouro Direto) e educação financeira.
+    return `Você é a FinanceIA, assistente financeira pessoal do FinançasPro. Especialista em finanças pessoais e mercado brasileiro (B3, FIIs, Tesouro Direto).
 
-DADOS FINANCEIROS DO USUÁRIO — ${ctx.month}:
-• Receita:      R$${ctx.income.toFixed(2)}
-• Despesas:     R$${ctx.expense.toFixed(2)} (${ctx.expenseRate.toFixed(0)}% da receita)
-• Investimentos: R$${ctx.invested.toFixed(2)} (${(ctx.invested > 0 && ctx.income > 0 ? (ctx.invested / ctx.income * 100) : 0).toFixed(0)}% da receita)
-• Saldo livre:  R$${ctx.balance.toFixed(2)}
+DADOS DO USUÁRIO — ${ctx.month}:
+• Receita: R$${ctx.income.toFixed(2)}
+• Despesas: R$${ctx.expense.toFixed(2)} (${ctx.expenseRate.toFixed(0)}% da receita)
+• Investimentos: R$${ctx.invested.toFixed(2)}
+• Saldo livre: R$${ctx.balance.toFixed(2)}
 • Taxa de poupança: ${ctx.savingsRate.toFixed(1)}%
 
-PRINCIPAIS CATEGORIAS DE GASTOS:
+GASTOS POR CATEGORIA:
 ${categoriesStr}
 
-CARTEIRA DE INVESTIMENTOS:
+CARTEIRA:
 ${portfolioStr}
 
 INSTRUÇÕES:
-- Responda SEMPRE em português do Brasil, de forma clara e acessível
-- Dê recomendações PERSONALIZADAS baseadas nos dados acima
-- Para sugestões de ativos, use dados reais do mercado brasileiro (B3, FIIs, ETFs como IVVB11, BOVA11)
-- Seja direto: dê recomendações concretas, não genéricas
-- Use emojis com moderação para tornar a resposta mais visual
-- Para economia de dinheiro, analise as categorias de gastos e sugira cortes específicos
-- Respostas concisas (máx 300 palavras) mas completas
-- Sempre inclua ao final: "⚠️ Sugestões geradas por IA. Não constituem recomendação financeira profissional regulamentada pela CVM."
+- Responda em português do Brasil, de forma clara e direta
+- Recomendações PERSONALIZADAS baseadas nos dados acima
+- Máximo 300 palavras, objetivo e útil
+- Use emojis com moderação
+- Sempre inclua ao final: "⚠️ Sugestões por IA. Não é recomendação financeira profissional (CVM)."
 
-Responda a pergunta do usuário com base nesses dados.`
+Responda a pergunta do usuário.`
 }
