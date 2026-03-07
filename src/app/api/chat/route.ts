@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { GoogleGenerativeAI } from '@google/generative-ai'
+import { GoogleGenAI } from '@google/genai'
 
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY ?? '')
+const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY ?? '' })
 
 export async function POST(req: NextRequest) {
     try {
@@ -12,36 +12,31 @@ export async function POST(req: NextRequest) {
             history: { role: string; text: string }[]
         }
 
-        const model = genAI.getGenerativeModel({ model: 'gemini-1.5-pro' })
-
         const systemPrompt = buildSystemPrompt(context)
 
-        // Build chat history for multi-turn
-        const chat = model.startChat({
-            history: [
-                {
-                    role: 'user',
-                    parts: [{ text: systemPrompt }],
-                },
-                {
-                    role: 'model',
-                    parts: [{ text: 'Entendido! Analisei os seus dados financeiros e estou pronto para ajudá-lo com recomendações personalizadas. Como posso ajudar?' }],
-                },
-                ...history.map(h => ({
-                    role: h.role as 'user' | 'model',
-                    parts: [{ text: h.text }],
-                })),
-            ],
-            generationConfig: {
+        // Build contents array with full conversation history
+        const contents = [
+            { role: 'user', parts: [{ text: systemPrompt }] },
+            { role: 'model', parts: [{ text: 'Entendido! Analisei seus dados financeiros e estou pronto para ajudar com recomendações personalizadas. Como posso ajudar?' }] },
+            ...history.map(h => ({
+                role: h.role as 'user' | 'model',
+                parts: [{ text: h.text }],
+            })),
+            { role: 'user', parts: [{ text: message }] },
+        ]
+
+        const response = await ai.models.generateContent({
+            model: 'gemini-2.0-flash',
+            contents,
+            config: {
                 maxOutputTokens: 800,
                 temperature: 0.7,
             },
         })
 
-        const result = await chat.sendMessage(message)
-        const response = result.response.text()
+        const reply = response.text ?? '(sem resposta)'
+        return NextResponse.json({ reply })
 
-        return NextResponse.json({ reply: response })
     } catch (err: any) {
         console.error('Gemini error:', err)
         return NextResponse.json({ error: err.message ?? 'Erro interno' }, { status: 500 })
@@ -87,13 +82,12 @@ ${portfolioStr}
 INSTRUÇÕES:
 - Responda SEMPRE em português do Brasil, de forma clara e acessível
 - Dê recomendações PERSONALIZADAS baseadas nos dados acima
-- Para sugestões de ativos, use os dados reais do mercado brasileiro (B3, FIIs consolidados, ETFs como IVVB11, BOVA11)
+- Para sugestões de ativos, use dados reais do mercado brasileiro (B3, FIIs, ETFs como IVVB11, BOVA11)
 - Seja direto: dê recomendações concretas, não genéricas
 - Use emojis com moderação para tornar a resposta mais visual
 - Para economia de dinheiro, analise as categorias de gastos e sugira cortes específicos
-- Respostas devem ser concisas (máx 300 palavras) mas completas
+- Respostas concisas (máx 300 palavras) mas completas
+- Sempre inclua ao final: "⚠️ Sugestões geradas por IA. Não constituem recomendação financeira profissional regulamentada pela CVM."
 
-AVISO OBRIGATÓRIO: Sempre que sugerir ativos, inclua no final: "⚠️ Sugestões geradas por IA. Não constituem recomendação financeira profissional regulamentada pela CVM."
-
-Agora responda a pergunta do usuário com base nesses dados.`
+Responda a pergunta do usuário com base nesses dados.`
 }
