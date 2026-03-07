@@ -776,6 +776,10 @@ export default function DashboardPage() {
                     <span className="nav-icon-wrap"><Plus size={18} /></span>
                     Novo
                 </Link>
+                <Link href="/portfolio" className="nav-item">
+                    <span className="nav-icon-wrap"><span style={{ fontSize: '1.2rem' }}>💼</span></span>
+                    Carteira
+                </Link>
             </nav>
         </div>
     )
