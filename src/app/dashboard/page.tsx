@@ -780,6 +780,10 @@ export default function DashboardPage() {
                     <span className="nav-icon-wrap"><span style={{ fontSize: '1.2rem' }}>💼</span></span>
                     Carteira
                 </Link>
+                <Link href="/ai" className="nav-item">
+                    <span className="nav-icon-wrap"><span style={{ fontSize: '1.2rem' }}>🤖</span></span>
+                    FinanceIA
+                </Link>
             </nav>
         </div>
     )
