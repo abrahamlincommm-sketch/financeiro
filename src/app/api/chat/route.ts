@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 
 const API_KEY = process.env.GEMINI_API_KEY ?? ''
-const MODEL = 'gemini-1.5-flash'
+const MODEL = 'gemini-pro'
 const ENDPOINT = `https://generativelanguage.googleapis.com/v1/models/${MODEL}:generateContent`
 
 export async function POST(req: NextRequest) {
