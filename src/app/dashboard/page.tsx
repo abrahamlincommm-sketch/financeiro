@@ -9,6 +9,7 @@ import {
     PieChart, Pie, Cell, Tooltip, ResponsiveContainer,
     BarChart, Bar, XAxis, YAxis, CartesianGrid,
     AreaChart, Area, ReferenceLine,
+    LineChart as RLineChart, Line,
 } from 'recharts'
 import {
     TrendingUp, TrendingDown, Plus, LogOut,
@@ -213,6 +214,27 @@ export default function DashboardPage() {
     const areaPos = areaData.length > 0 && areaData[areaData.length - 1]?.saldo >= 0
     const investmentTxs = transactions.filter(t => t.type === 'investment')
 
+    /* ── Budget donut data: Disponível / Gasto / Investido ── */
+    const budgetSlices = income > 0
+        ? [
+            { name: 'Disponível', value: Math.max(0, balance), color: '#10b981' },
+            { name: 'Gasto', value: expense, color: '#f43f5e' },
+            { name: 'Investido', value: invested, color: '#f59e0b' },
+        ].filter(s => s.value > 0)
+        : []
+
+    /* ── Compound projection: 12 months at 1%/month ── */
+    const avgMonthlyInvestment = barData.length > 0
+        ? barData.reduce((s, b) => s + (b.investment ?? 0), 0) / barData.length
+        : invested
+    const projectionData = avgMonthlyInvestment > 0
+        ? Array.from({ length: 13 }, (_, i) => ({
+            mes: i === 0 ? 'Hoje' : `+${i}m`,
+            patrimonio: parseFloat((avgMonthlyInvestment * i * Math.pow(1.01, i / 2)).toFixed(2)),
+            aporte: parseFloat((avgMonthlyInvestment * i).toFixed(2)),
+        }))
+        : []
+
     const TABS = [
         { id: 'overview', emoji: '📊', label: 'Geral' },
         { id: 'expenses', emoji: '💸', label: 'Despesas' },
@@ -363,6 +385,57 @@ export default function DashboardPage() {
                             </div>
                         ))}
                     </div>
+
+                    {/* ── Budget Donut ── */}
+                    {budgetSlices.length > 0 && (
+                        <div className="card fade-up" style={{ animationDelay: '.1s', padding: '1.3rem' }}>
+                            <p className="section-title">Distribuição do mês</p>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '1.25rem' }}>
+                                <div style={{ position: 'relative', width: 150, height: 150, flexShrink: 0 }}>
+                                    <ResponsiveContainer width="100%" height="100%">
+                                        <PieChart>
+                                            <Pie data={budgetSlices} cx="50%" cy="50%"
+                                                innerRadius={46} outerRadius={68}
+                                                dataKey="value" stroke="none" paddingAngle={3}
+                                                startAngle={90} endAngle={-270}>
+                                                {budgetSlices.map((s, i) => <Cell key={i} fill={s.color} />)}
+                                            </Pie>
+                                            <Tooltip content={<PieTip />} />
+                                        </PieChart>
+                                    </ResponsiveContainer>
+                                    <div style={{
+                                        position: 'absolute', inset: 0,
+                                        display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+                                        pointerEvents: 'none',
+                                    }}>
+                                        <p style={{ fontSize: '.58rem', fontWeight: 700, color: 'var(--text2)', textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: '.15rem' }}>Disponível</p>
+                                        <p style={{ fontSize: '.92rem', fontWeight: 900, color: '#10b981', letterSpacing: '-.02em', lineHeight: 1 }}>
+                                            {income > 0 ? ((Math.max(0, balance) / income) * 100).toFixed(0) : 0}%
+                                        </p>
+                                    </div>
+                                </div>
+                                <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '.85rem' }}>
+                                    {budgetSlices.map(s => (
+                                        <div key={s.name}>
+                                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '.3rem' }}>
+                                                <div style={{ display: 'flex', alignItems: 'center', gap: '.45rem' }}>
+                                                    <span style={{ width: 10, height: 10, borderRadius: 3, background: s.color, display: 'inline-block', boxShadow: `0 0 6px ${s.color}` }} />
+                                                    <span style={{ fontSize: '.78rem', fontWeight: 700 }}>{s.name}</span>
+                                                </div>
+                                                <span style={{ fontSize: '.75rem', fontWeight: 800, color: s.color }}>
+                                                    {income > 0 ? ((s.value / income) * 100).toFixed(0) : 0}%
+                                                </span>
+                                            </div>
+                                            <div className="progress-track" style={{ height: 5 }}>
+                                                <div className="progress-fill" style={{ width: `${income > 0 ? (s.value / income) * 100 : 0}%`, background: s.color }} />
+                                            </div>
+                                            <p style={{ fontSize: '.67rem', color: 'var(--muted)', marginTop: '.2rem' }}>{fmt(s.value)}</p>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        </div>
+                    )}
 
                     {/* Area chart */}
                     {areaData.length > 1 && (
@@ -547,6 +620,64 @@ export default function DashboardPage() {
                                         </div>)
                                     })}
                                 </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* ── Compound Projection Chart ── */}
+                    {projectionData.length > 1 && (
+                        <div className="card fade-up" style={{ animationDelay: '.09s' }}>
+                            <div style={{ marginBottom: '.75rem' }}>
+                                <p className="section-title" style={{ marginBottom: '.25rem' }}>Projeção de patrimônio</p>
+                                <p style={{ fontSize: '.72rem', color: 'var(--muted)', lineHeight: 1.45 }}>
+                                    Estimativa com aporte médio de <strong style={{ color: '#f59e0b' }}>{fmt(avgMonthlyInvestment)}/mês</strong> e juros compostos ~1%/mês
+                                </p>
+                            </div>
+                            <div style={{ height: 160 }}>
+                                <ResponsiveContainer width="100%" height="100%">
+                                    <RLineChart data={projectionData} margin={{ top: 4, right: 4, left: 0, bottom: 0 }}>
+                                        <defs>
+                                            <linearGradient id="projGrad" x1="0" y1="0" x2="1" y2="0">
+                                                <stop offset="0%" stopColor="#f59e0b" />
+                                                <stop offset="100%" stopColor="#10b981" />
+                                            </linearGradient>
+                                        </defs>
+                                        <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,.05)" vertical={false} />
+                                        <XAxis dataKey="mes" tick={{ fill: 'var(--muted)', fontSize: 10 }} axisLine={false} tickLine={false} />
+                                        <YAxis tickFormatter={fmtShort} tick={{ fill: 'var(--muted)', fontSize: 10 }} axisLine={false} tickLine={false} width={44} />
+                                        <Tooltip
+                                            content={({ active, payload, label }: any) => {
+                                                if (!active || !payload?.length) return null
+                                                return (
+                                                    <div style={{ background: 'rgba(12,12,36,.95)', border: '1px solid rgba(245,158,11,.35)', borderRadius: 12, padding: '10px 14px', fontSize: 12, backdropFilter: 'blur(12px)' }}>
+                                                        <p style={{ fontWeight: 700, color: 'var(--text)', marginBottom: 4 }}>{label}</p>
+                                                        <p style={{ color: '#10b981' }}>Com juros: {fmt(payload[0]?.value ?? 0)}</p>
+                                                        <p style={{ color: 'rgba(255,255,255,.4)' }}>Sem juros: {fmt(payload[1]?.value ?? 0)}</p>
+                                                    </div>
+                                                )
+                                            }}
+                                        />
+                                        {/* Compound line */}
+                                        <Line type="monotone" dataKey="patrimonio"
+                                            stroke="url(#projGrad)" strokeWidth={2.5}
+                                            dot={false}
+                                            activeDot={{ r: 5, fill: '#10b981', stroke: 'var(--bg)', strokeWidth: 2 }} />
+                                        {/* Simple (no interest) dashed line */}
+                                        <Line type="monotone" dataKey="aporte"
+                                            stroke="rgba(255,255,255,.2)" strokeWidth={1.5}
+                                            strokeDasharray="4 4" dot={false} />
+                                    </RLineChart>
+                                </ResponsiveContainer>
+                            </div>
+                            <div style={{ display: 'flex', gap: '1.5rem', justifyContent: 'center', marginTop: '.6rem' }}>
+                                <span style={{ display: 'flex', alignItems: 'center', gap: '.4rem', fontSize: '.7rem', color: 'var(--text2)' }}>
+                                    <span style={{ width: 16, height: 2, background: 'linear-gradient(90deg,#f59e0b,#10b981)', display: 'inline-block', borderRadius: 1 }} />
+                                    Com juros compostos
+                                </span>
+                                <span style={{ display: 'flex', alignItems: 'center', gap: '.4rem', fontSize: '.7rem', color: 'var(--muted)' }}>
+                                    <span style={{ width: 16, height: 2, background: 'rgba(255,255,255,.25)', display: 'inline-block', borderRadius: 1, borderTop: '1px dashed rgba(255,255,255,.4)' }} />
+                                    Sem juros
+                                </span>
                             </div>
                         </div>
                     )}
