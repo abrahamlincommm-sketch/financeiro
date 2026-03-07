@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 
-const API_KEY = process.env.GEMINI_API_KEY ?? ''
-const MODEL = 'gemini-2.0-flash-lite'
-const ENDPOINT = `https://generativelanguage.googleapis.com/v1/models/${MODEL}:generateContent`
+const GROQ_API_KEY = process.env.GROQ_API_KEY ?? ''
+const GROQ_MODEL = 'llama-3.3-70b-versatile' // Fast, free, excellent quality
+const GROQ_ENDPOINT = 'https://api.groq.com/openai/v1/chat/completions'
 
 export async function POST(req: NextRequest) {
     try {
@@ -15,22 +15,23 @@ export async function POST(req: NextRequest) {
 
         const systemPrompt = buildSystemPrompt(context)
 
-        const contents = [
-            { role: 'user', parts: [{ text: systemPrompt }] },
-            { role: 'model', parts: [{ text: 'Entendido! Analisei seus dados e estou pronto para ajudar com recomendações personalizadas.' }] },
-            ...history.map(h => ({
-                role: h.role as 'user' | 'model',
-                parts: [{ text: h.text }],
-            })),
-            { role: 'user', parts: [{ text: message }] },
+        const messages = [
+            { role: 'system', content: systemPrompt },
+            ...history.map(h => ({ role: h.role === 'model' ? 'assistant' : 'user', content: h.text })),
+            { role: 'user', content: message },
         ]
 
-        const res = await fetch(`${ENDPOINT}?key=${API_KEY}`, {
+        const res = await fetch(GROQ_ENDPOINT, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${GROQ_API_KEY}`,
+            },
             body: JSON.stringify({
-                contents,
-                generationConfig: { maxOutputTokens: 800, temperature: 0.7 },
+                model: GROQ_MODEL,
+                messages,
+                max_tokens: 800,
+                temperature: 0.7,
             }),
         })
 
@@ -40,11 +41,11 @@ export async function POST(req: NextRequest) {
             return NextResponse.json({ error: JSON.stringify(data.error ?? data) }, { status: res.status })
         }
 
-        const reply: string = data.candidates?.[0]?.content?.parts?.[0]?.text ?? '(sem resposta)'
+        const reply: string = data.choices?.[0]?.message?.content ?? '(sem resposta)'
         return NextResponse.json({ reply })
 
     } catch (err: any) {
-        console.error('Gemini error:', err)
+        console.error('Groq error:', err)
         return NextResponse.json({ error: err.message ?? 'Erro interno' }, { status: 500 })
     }
 }
@@ -81,11 +82,9 @@ CARTEIRA:
 ${portfolioStr}
 
 INSTRUÇÕES:
-- Responda em português do Brasil, de forma clara e direta
+- Responda SEMPRE em português do Brasil
 - Recomendações PERSONALIZADAS baseadas nos dados acima
-- Máximo 300 palavras, objetivo e útil
+- Máximo 300 palavras, direto e útil
 - Use emojis com moderação
-- Sempre inclua ao final: "⚠️ Sugestões por IA. Não é recomendação financeira profissional (CVM)."
-
-Responda a pergunta do usuário.`
+- Sempre inclua ao final: "⚠️ Sugestões por IA. Não é recomendação financeira profissional (CVM)."`
 }
