@@ -36,7 +36,20 @@ export type Transaction = {
   description?: string
   is_recurring: boolean
   type: 'income' | 'expense' | 'investment'
+  ticker?: string
+  quantity?: number
   created_at: string
   categories?: Category
+}
+
+export type Portfolio = {
+  id: string
+  user_id: string
+  ticker: string
+  name?: string
+  quantity: number
+  avg_price: number
+  asset_type: string
+  created_at: string
 }
 
