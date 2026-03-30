@@ -5,9 +5,23 @@ import './globals.css'
 const inter = Inter({ subsets: ['latin'] })
 
 export const metadata: Metadata = {
-  title: 'FinançasPro - Gerenciamento Financeiro',
-  description: 'Controle suas finanças pessoais com facilidade',
+  title: 'FinançasPro — Controle Total das suas Finanças',
+  description: 'App financeiro com dashboard inteligente, controle de gastos, carteira de investimentos e IA financeira 24h. Pague via PIX e comece hoje.',
   manifest: '/manifest.json',
+  keywords: ['finanças pessoais', 'controle financeiro', 'app financeiro', 'investimentos', 'orçamento pessoal', 'IA financeira'],
+  authors: [{ name: 'FinançasPro' }],
+  openGraph: {
+    title: 'FinançasPro — Controle Total das suas Finanças',
+    description: 'Dashboard inteligente, controle de gastos, carteira de investimentos e IA financeira 24h.',
+    type: 'website',
+    locale: 'pt_BR',
+    siteName: 'FinançasPro',
+  },
+  twitter: {
+    card: 'summary_large_image',
+    title: 'FinançasPro — Controle Total das suas Finanças',
+    description: 'Dashboard inteligente, controle de gastos e IA financeira.',
+  },
   appleWebApp: {
     capable: true,
     statusBarStyle: 'black-translucent',
@@ -16,7 +30,7 @@ export const metadata: Metadata = {
 }
 
 export const viewport: Viewport = {
-  themeColor: '#6366f1',
+  themeColor: '#7c3aed',
   width: 'device-width',
   initialScale: 1,
   maximumScale: 1,
@@ -41,3 +55,4 @@ export default function RootLayout({
     </html>
   )
 }
+

@@ -1,8 +1,9 @@
 'use client'
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
+import Link from 'next/link'
 import { supabase } from '@/lib/supabase'
-import { Eye, EyeOff, TrendingUp, Lock, Mail } from 'lucide-react'
+import { Eye, EyeOff, TrendingUp, Lock, Mail, CheckCircle } from 'lucide-react'
 
 export default function LoginPage() {
     const router = useRouter()
@@ -11,12 +12,25 @@ export default function LoginPage() {
     const [showPass, setShowPass] = useState(false)
     const [loading, setLoading] = useState(false)
     const [error, setError] = useState('')
+    const [resetSent, setResetSent] = useState(false)
+    const [showReset, setShowReset] = useState(false)
+    const [resetEmail, setResetEmail] = useState('')
+    const [resetLoading, setResetLoading] = useState(false)
 
     async function handleLogin(e: React.FormEvent) {
         e.preventDefault(); setLoading(true); setError('')
         const { error: err } = await supabase.auth.signInWithPassword({ email, password })
         if (err) { setError('E-mail ou senha inválidos.'); setLoading(false) }
         else { router.replace('/dashboard') }
+    }
+
+    async function handleReset(e: React.FormEvent) {
+        e.preventDefault(); setResetLoading(true)
+        const { error: err } = await supabase.auth.resetPasswordForEmail(resetEmail, {
+            redirectTo: `${window.location.origin}/dashboard`,
+        })
+        setResetLoading(false)
+        if (!err) setResetSent(true)
     }
 
     return (
@@ -114,14 +128,47 @@ export default function LoginPage() {
                     <button id="login-submit" type="submit" className="btn-primary" style={{ marginTop: '.25rem' }} disabled={loading}>
                         {loading ? <div className="spinner" /> : '→ Entrar'}
                     </button>
+
+                    <button type="button" onClick={() => setShowReset(true)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--muted)', fontSize: '.78rem', fontWeight: 600, marginTop: '.25rem', fontFamily: 'inherit', textAlign: 'center', width: '100%' }}>
+                        Esqueci minha senha
+                    </button>
                 </form>
             </div>
 
+            {/* Reset Password Modal */}
+            {showReset && (
+                <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.75)', backdropFilter: 'blur(8px)', zIndex: 200, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1.5rem' }}
+                    onClick={e => { if (e.target === e.currentTarget) setShowReset(false) }}>
+                    <div className="card-gradient-border fade-up" style={{ width: '100%', maxWidth: 380, background: 'rgba(10,10,30,.95)', padding: '2rem', backdropFilter: 'blur(32px)' }}>
+                        {resetSent ? (
+                            <div style={{ textAlign: 'center' }}>
+                                <CheckCircle size={48} color="#10b981" style={{ margin: '0 auto 1rem' }} />
+                                <h3 style={{ fontWeight: 800, marginBottom: '.5rem' }}>E-mail enviado!</h3>
+                                <p style={{ color: 'var(--text2)', fontSize: '.85rem', lineHeight: 1.6 }}>Verifique sua caixa de entrada e clique no link para redefinir sua senha.</p>
+                                <button className="btn-primary" style={{ marginTop: '1.5rem' }} onClick={() => { setShowReset(false); setResetSent(false) }}>Fechar</button>
+                            </div>
+                        ) : (
+                            <form onSubmit={handleReset}>
+                                <h3 style={{ fontWeight: 800, fontSize: '1.05rem', marginBottom: '1.25rem' }}>Redefinir senha</h3>
+                                <p style={{ color: 'var(--text2)', fontSize: '.83rem', marginBottom: '1.25rem', lineHeight: 1.6 }}>Informe seu e-mail e enviaremos um link para redefinir sua senha.</p>
+                                <input type="email" required className="input" placeholder="seu@email.com" style={{ marginBottom: '1rem' }} value={resetEmail} onChange={e => setResetEmail(e.target.value)} />
+                                <button type="submit" className="btn-primary" disabled={resetLoading}>
+                                    {resetLoading ? <div className="spinner" /> : 'Enviar link'}
+                                </button>
+                            </form>
+                        )}
+                    </div>
+                </div>
+            )}
+
             {/* Footer */}
-            <div className="fade-up" style={{ marginTop: '2rem', textAlign: 'center', animationDelay: '.2s' }}>
+            <div className="fade-up" style={{ marginTop: '1.75rem', textAlign: 'center', animationDelay: '.2s' }}>
+                <p style={{ fontSize: '.8rem', color: 'var(--text2)', marginBottom: '1rem' }}>
+                    Não tem conta? <Link href="/checkout?plano=anual" style={{ color: '#a78bfa', fontWeight: 700, textDecoration: 'none' }}>Assinar agora →</Link>
+                </p>
                 {[
                     ['🔒', 'Dados criptografados'],
-                    ['🛡️', 'RLS ativo'],
+                    ['⚡', 'PIX instantâneo'],
                     ['📱', 'PWA instalável'],
                 ].map(([icon, label]) => (
                     <span key={label} style={{
